@@ -10,14 +10,14 @@ const axios = require('axios');
 /***********************************************************
  * GLOBAL / CONFIG
  ***********************************************************/
-// 1) Store the current QR code text for Express to display
+// 1) Store the current QR code text for the Express page
 let currentQR = "";
 
 // 2) Admin phone number
 const ADMIN_NUMBER = '254701339573@c.us';
 
 // 3) Bot config: editable strings and channel ID
-//    Admin can change these via commands like: edit <key> <newValue>
+//    Admin can change these with commands like: "edit <key> <newValue>"
 let botConfig = {
   welcomeMessage: "*👋 Welcome to FY'S PROPERTY Deposit Bot!*\nHow much would you like to deposit? 💰",
   depositChosen: "*👍 Great!* You've chosen to deposit *Ksh {amount}*.\nNow, please provide your deposit number (e.g., your account number) 📱",
@@ -29,7 +29,7 @@ let botConfig = {
   channelID: 529
 };
 
-// 4) In-memory conversation state per user
+// In-memory conversation state per user
 const conversations = {};
 
 /***********************************************************
@@ -64,12 +64,31 @@ function parsePlaceholders(template, data) {
     .replace(/{footer}/g, botConfig.paymentFooter || '');
 }
 
+// Formats a phone number for WhatsApp. E.g. "07..." => "2547..."
+function formatPhoneNumber(numStr) {
+  // Remove non-digits
+  let cleaned = numStr.replace(/[^\d]/g, '');
+  // If starts with 0 => replace with 254
+  if (cleaned.startsWith('0')) {
+    cleaned = '254' + cleaned.substring(1);
+  }
+  // Must start with 254
+  if (!cleaned.startsWith('254')) {
+    return null;
+  }
+  // Must be at least 10 or 11+ digits
+  if (cleaned.length < 10) {
+    return null;
+  }
+  return cleaned + '@c.us';
+}
+
 // Send STK push to Pay Hero
 async function sendSTKPush(amount, phone) {
   const payload = {
     amount: amount,
     phone_number: phone,
-    channel_id: botConfig.channelID, // <-- use the editable channelID
+    channel_id: botConfig.channelID, // use the editable channelID
     provider: "m-pesa",
     external_reference: "INV-009",
     customer_name: "John Doe",
@@ -122,15 +141,14 @@ function parseBroadcastCommand(msg) {
   const bracketStart = msg.indexOf('[');
   const bracketEnd = msg.indexOf(']');
   if (bracketStart < 0 || bracketEnd < 0) return null;
+
   const numbersStr = msg.substring(bracketStart + 1, bracketEnd).trim();
   const theMessage = msg.substring(bracketEnd + 1).trim();
   const numbersArr = numbersStr.split(',').map(n => n.trim());
   return { numbers: numbersArr, text: theMessage };
 }
 
-/***********************************************************
- * ADMIN COMMANDS - show usage if "admin"
- ***********************************************************/
+// Admin help message
 function getAdminHelp() {
   return (
     "*ADMIN COMMANDS:*\n" +
@@ -144,9 +162,9 @@ function getAdminHelp() {
     "   - paymentFooter\n" +
     "   - fromAdmin\n" +
     "   - channelID\n" +
-    "   Example:\n     edit depositChosen Great, you've chosen {amount} to deposit!\n" +
+    "   Example:\n     edit depositChosen Great, you decided to deposit {amount} Ksh!\n" +
     "3) *msg [2547...,2547...] message...* - Broadcast to multiple users.\n" +
-    "   Example:\n     msg [254712345678,254701234567] Hello all!\n"
+    "   Example:\n     msg [254712345678,254701234567] Hello from Admin GK-FY!\n"
   );
 }
 
@@ -158,19 +176,19 @@ client.on('message', async message => {
   const text = message.body.trim();
   const lowerText = text.toLowerCase();
 
-  // 1) If this is a group message, ignore (it doesn't work in group).
+  // 1) If this is a group message, ignore
   if (sender.endsWith('@g.us')) {
-    return; // do nothing for groups
+    return; // do nothing in group chats
   }
 
   // 2) If user is admin => handle admin commands
   if (sender === ADMIN_NUMBER) {
-    // If user typed "admin" => show admin help
+    // Show admin help if "admin"
     if (lowerText === 'admin') {
       message.reply(getAdminHelp());
       return;
     }
-    // If user typed "edit <key> <newValue>"
+    // If "edit <key> <newValue>"
     if (lowerText.startsWith('edit ')) {
       const parts = text.split(' ');
       if (parts.length < 3) {
@@ -200,7 +218,7 @@ client.on('message', async message => {
       message.reply(`*${key}* updated successfully!`);
       return;
     }
-    // If user typed "msg ["
+    // If "msg ["
     if (lowerText.startsWith('msg [')) {
       const result = parseBroadcastCommand(text);
       if (!result) {
@@ -212,19 +230,28 @@ client.on('message', async message => {
         message.reply("*⚠️ Invalid format.*");
         return;
       }
-      // Send to each user
-      for (let num of numbers) {
-        const finalNumber = num.endsWith('@c.us') ? num : (num + '@c.us');
-        client.sendMessage(finalNumber, `*${botConfig.fromAdmin}:*\n${adminMsg}`);
+      // Send to each user with number formatting
+      for (let rawNum of numbers) {
+        const finalNumber = formatPhoneNumber(rawNum);
+        if (!finalNumber) {
+          // skip or notify
+          message.reply(`*⚠️ Skipping invalid number:* ${rawNum}`);
+          continue;
+        }
+        try {
+          await client.sendMessage(finalNumber, `*${botConfig.fromAdmin}:*\n${adminMsg}`);
+        } catch (err) {
+          console.error("Mass message error =>", err);
+          message.reply(`*⚠️ Could not send to:* ${rawNum}`);
+        }
       }
       message.reply("*Message sent successfully to the specified users!*");
       return;
     }
-    // If admin typed something else, we let it fall through to deposit flow
+    // If admin typed something else, fall through to deposit flow
   }
 
   // 3) DEPOSIT FLOW
-  // If user types "start", reset conversation
   if (lowerText === 'start') {
     conversations[sender] = { stage: 'awaitingAmount' };
     message.reply(botConfig.welcomeMessage);
@@ -270,7 +297,7 @@ client.on('message', async message => {
     }
     conv.stkRef = ref;
 
-    // Admin alert about deposit attempt
+    // Alert admin about deposit attempt
     const attemptTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
     sendAdminAlert(
       `*💸 Deposit Attempt:*\n` +
