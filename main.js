@@ -7,15 +7,21 @@ const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const axios = require('axios');
 
-// Global variable to hold the current QR code text
+// 1) Global variable to hold the current QR code text (for the Express page).
 let currentQR = "";
 
-// Create the WhatsApp client instance with local authentication
+// 2) Admin number
+const adminNumber = '254701339573@c.us';
+
+// 3) Customizable welcome message (edited by admin command).
+let welcomeMessage = "*👋 Welcome to FY'S PROPERTY Deposit Bot!*\nHow much would you like to deposit? 💰";
+
+// 4) Create the WhatsApp client instance with local authentication.
 const client = new Client({
     authStrategy: new LocalAuth()
 });
 
-// When a QR code is generated, store it and print to terminal
+// When a QR code is generated, store it and also print to terminal
 client.on('qr', qr => {
     currentQR = qr;
     qrcodeTerminal.generate(qr, { small: true });
@@ -26,7 +32,7 @@ client.on('ready', () => {
     console.log('WhatsApp client is *ready*!');
 });
 
-// In-memory conversation state per chat
+// 5) In-memory conversation state per chat
 const conversations = {};
 
 // Helper function: send STK push to Pay Hero
@@ -77,29 +83,89 @@ async function fetchTransactionStatus(ref) {
     }
 }
 
-// Helper function: send alert to admin (254701339573)
+// Helper function: send alert to admin
 function sendAdminAlert(text) {
-    const adminNumber = '254701339573@c.us';
     client.sendMessage(adminNumber, text);
 }
 
-// Listen for incoming WhatsApp messages and handle deposit flow
+// Helper function: parse broadcast command from admin
+function parseBroadcastCommand(msg) {
+    // Example command: msg [254712345678,254700123456] Hello guys, test message
+    // 1) Check for "msg ["
+    const bracketStart = msg.indexOf('[');
+    const bracketEnd = msg.indexOf(']');
+    if (bracketStart < 0 || bracketEnd < 0) return null;
+
+    // Extract the bracket content
+    const numbersStr = msg.substring(bracketStart + 1, bracketEnd).trim();
+    // The message text is after the bracket
+    const theMessage = msg.substring(bracketEnd + 1).trim();
+    // Split the numbers by comma
+    const numbersArr = numbersStr.split(',').map(n => n.trim());
+    return { numbers: numbersArr, text: theMessage };
+}
+
+// 6) Listen for incoming WhatsApp messages
 client.on('message', async message => {
     const sender = message.from;
     const text = message.body.trim();
     const lowerText = text.toLowerCase();
 
+    /********************************************
+     * Check if the message is from the admin
+     ********************************************/
+    if (sender === adminNumber) {
+        // 6a) Admin can edit welcome message
+        // e.g. "editwelcome This is the new welcome text"
+        if (lowerText.startsWith('editwelcome ')) {
+            const newWelcome = message.body.substring('editwelcome '.length).trim();
+            welcomeMessage = newWelcome || welcomeMessage;
+            message.reply("*Welcome message updated successfully!*");
+            return;
+        }
+
+        // 6b) Admin can send a broadcast message
+        // e.g. "msg [254712345678,254701234567] Hello guys, test message"
+        if (lowerText.startsWith('msg [')) {
+            const result = parseBroadcastCommand(message.body);
+            if (!result) {
+                message.reply("*⚠️ Invalid format.* Use: msg [2547...,2547...] Your message");
+                return;
+            }
+            const { numbers, text: adminMsg } = result;
+            if (!numbers || !adminMsg) {
+                message.reply("*⚠️ Invalid format.*");
+                return;
+            }
+            // Send message to each user
+            for (let num of numbers) {
+                const finalNumber = num.endsWith('@c.us') ? num : (num + '@c.us');
+                // Add a small "From Admin GK-FY" style
+                client.sendMessage(
+                    finalNumber,
+                    `*From Admin GK-FY:*\n${adminMsg}`
+                );
+            }
+            message.reply("*Message sent successfully to the specified users!*");
+            return;
+        }
+        // If admin typed something else, fall through to deposit flow
+    }
+
+    /********************************************
+     * Deposit Flow
+     ********************************************/
     // If user types "start", reset conversation
     if (lowerText === 'start') {
         conversations[sender] = { stage: 'awaitingAmount' };
-        message.reply("*👋 Welcome to FY'S PROPERTY Deposit Bot!*\nHow much would you like to deposit? 💰");
+        message.reply(welcomeMessage);
         return;
     }
 
-    // Initialize conversation if not set
+    // If no conversation, initialize it
     if (!conversations[sender]) {
         conversations[sender] = { stage: 'awaitingAmount' };
-        message.reply("*👋 Welcome to FY'S PROPERTY Deposit Bot!*\nHow much would you like to deposit? 💰\n(Type 'Start' anytime to restart.)");
+        message.reply(welcomeMessage);
         return;
     }
 
@@ -141,10 +207,10 @@ client.on('message', async message => {
             `Time (KE): ${attemptTime}`
         );
 
-        // Inform user and show minimal countdown updates
+        // Inform user, minimal countdown approach
         message.reply("*⏳ Payment initiated!* We'll check status in 20 seconds...\n_Stay tuned!_");
 
-        // After 10 seconds, send a 10-second-left update
+        // After 10 seconds, send an update
         setTimeout(() => {
             client.sendMessage(sender, "*⏳ 10 seconds left...*\nWe will fetch the status soon!");
         }, 10000);
@@ -163,7 +229,6 @@ client.on('message', async message => {
             const currentDateTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
 
             if (finalStatus === "SUCCESS") {
-                // Payment success
                 message.reply(
                     `*🎉 Payment Successful!*\n` +
                     `*💰 Amount:* Ksh ${conv.amount}\n` +
@@ -181,7 +246,6 @@ client.on('message', async message => {
                     `Time (KE): ${currentDateTime}`
                 );
             } else if (finalStatus === "FAILED") {
-                // Payment failed
                 let errMsg = "Your payment could not be completed. Please try again.";
                 if (resultDesc.toLowerCase().includes('insufficient')) {
                     errMsg = "Insufficient funds in your account.";
@@ -197,7 +261,6 @@ client.on('message', async message => {
                     `Time (KE): ${currentDateTime}`
                 );
             } else {
-                // Payment pending
                 message.reply(
                     `*⏳ Payment Pending.* Current status: ${finalStatus}\n` +
                     `Please wait a bit longer or contact support.\n(Type *Start* to restart.)`
@@ -210,7 +273,7 @@ client.on('message', async message => {
     }
 });
 
-// Initialize the WhatsApp client
+// 7) Initialize the WhatsApp client
 client.initialize();
 
 // --------------------------------------------------------
