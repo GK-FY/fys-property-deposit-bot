@@ -1,5 +1,5 @@
 {
-  "name": "fys-property-deposit-bot",
+  "name": "fys-deposit-bot",
   "version": "1.0.0",
   "description": "WhatsApp deposit bot for FY'S PROPERTY with immediate STK push, minimal countdown updates, admin alerts, and QR display",
   "main": "main.js",
@@ -13,6 +13,6 @@
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.18.6"
   },
-  "author": "GK-FY",
+  "author": "Your Name",
   "license": "ISC"
 }
