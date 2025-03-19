@@ -1,26 +1,32 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const express = require('express');
+const qrcodeTerminal = require('qrcode-terminal');
+const QRCode = require('qrcode');
 const axios = require('axios');
 
-// In-memory conversation state per chat.
-const conversations = {};
+// Global variable to hold the current QR code text.
+let currentQR = "";
 
 // Create the WhatsApp client instance with local authentication.
 const client = new Client({
     authStrategy: new LocalAuth()
 });
 
-// Display QR code in the terminal.
+// When a QR code is generated, save it and also print it to the terminal.
 client.on('qr', qr => {
-    qrcode.generate(qr, { small: true });
+    currentQR = qr;
+    qrcodeTerminal.generate(qr, { small: true });
 });
 
-// When client is ready.
+// When the client is ready.
 client.on('ready', () => {
-    console.log('Client is ready!');
+    console.log('WhatsApp client is ready!');
 });
 
-// Helper function to send an STK push.
+// In-memory conversation state per chat.
+const conversations = {};
+
+// Helper function: send STK push.
 async function sendSTKPush(amount, phone) {
     const payload = {
         amount: amount,
@@ -29,7 +35,7 @@ async function sendSTKPush(amount, phone) {
         provider: "m-pesa",
         external_reference: "INV-009",
         customer_name: "John Doe",
-        callback_url: "https://your-callback-url", // Replace with your callback URL if needed.
+        callback_url: "https://your-callback-url", // Replace with your actual callback URL if needed.
         account_reference: "FY'S PROPERTY",
         transaction_desc: "FY'S PROPERTY Payment",
         remarks: "FY'S PROPERTY",
@@ -37,16 +43,12 @@ async function sendSTKPush(amount, phone) {
         companyName: "FY'S PROPERTY"
     };
     try {
-        const response = await axios.post(
-            'https://backend.payhero.co.ke/api/v2/payments',
-            payload,
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=='
-                }
+        const response = await axios.post('https://backend.payhero.co.ke/api/v2/payments', payload, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=='
             }
-        );
+        });
         return response.data.reference;
     } catch (error) {
         console.error("STK Push Error:", error);
@@ -54,17 +56,14 @@ async function sendSTKPush(amount, phone) {
     }
 }
 
-// Helper function to fetch transaction status.
+// Helper function: fetch transaction status.
 async function fetchTransactionStatus(ref) {
     try {
-        const response = await axios.get(
-            `https://backend.payhero.co.ke/api/v2/transaction-status?reference=${encodeURIComponent(ref)}`,
-            {
-                headers: {
-                    'Authorization': 'Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=='
-                }
+        const response = await axios.get(`https://backend.payhero.co.ke/api/v2/transaction-status?reference=${encodeURIComponent(ref)}`, {
+            headers: {
+                'Authorization': 'Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=='
             }
-        );
+        });
         return response.data;
     } catch (error) {
         console.error("Status Fetch Error:", error);
@@ -72,9 +71,9 @@ async function fetchTransactionStatus(ref) {
     }
 }
 
-// Helper function to send alert messages to admin.
+// Helper function: send alert to admin.
 function sendAdminAlert(text) {
-    // Admin number in WhatsApp format.
+    // WhatsApp admin number in proper format.
     const adminNumber = '254701339573@c.us';
     client.sendMessage(adminNumber, text);
 }
@@ -85,17 +84,17 @@ client.on('message', async message => {
     const text = message.body.trim();
     const lowerText = text.toLowerCase();
 
-    // Allow restart any time.
+    // Restart conversation if user sends "start".
     if (lowerText === 'start') {
         conversations[sender] = { stage: 'awaitingAmount' };
         message.reply("👋 Welcome to FY'S PROPERTY Deposit Bot!\nHow much would you like to deposit? 💰");
         return;
     }
 
-    // Initialize conversation if not set.
+    // Initialize conversation if not present.
     if (!conversations[sender]) {
         conversations[sender] = { stage: 'awaitingAmount' };
-        message.reply("👋 Welcome to FY'S PROPERTY Deposit Bot!\nHow much would you like to deposit? 💰\n(Type 'Start' to restart anytime.)");
+        message.reply("👋 Welcome to FY'S PROPERTY Deposit Bot!\nHow much would you like to deposit? 💰\n(Type 'Start' anytime to restart.)");
         return;
     }
 
@@ -118,8 +117,8 @@ client.on('message', async message => {
     if (conv.stage === 'awaitingDepositNumber') {
         conv.depositNumber = text;
         conv.stage = 'processing';
-        
-        // Immediately send the STK push.
+
+        // Immediately initiate STK push.
         const ref = await sendSTKPush(conv.amount, conv.depositNumber);
         if (!ref) {
             message.reply("❌ Error: Unable to initiate payment. Please try again later.");
@@ -128,22 +127,20 @@ client.on('message', async message => {
         }
         conv.stkRef = ref;
         
-        // Send an alert to admin with the deposit attempt details.
+        // Send admin alert for deposit attempt.
         const attemptTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
         sendAdminAlert(`💸 Deposit Attempt:\nAmount: Ksh ${conv.amount}\nDeposit Number: ${conv.depositNumber}\nTime (KE): ${attemptTime}`);
         
-        // Immediately inform the user and start countdown.
+        // Inform user and start countdown.
         message.reply("⏳ Payment initiated! Countdown starts now: 20 seconds remaining...");
-        
-        // Start a countdown: send a message every second.
+
         let secondsLeft = 20;
         const countdownInterval = setInterval(() => {
             secondsLeft--;
-            // Send update every second.
             client.sendMessage(sender, `⏳ ${secondsLeft} second${secondsLeft === 1 ? '' : 's'} remaining...`);
             if (secondsLeft <= 0) {
                 clearInterval(countdownInterval);
-                // After countdown, fetch transaction status.
+                // After countdown, poll transaction status.
                 (async () => {
                     const statusData = await fetchTransactionStatus(conv.stkRef);
                     if (!statusData) {
@@ -158,7 +155,6 @@ client.on('message', async message => {
                     
                     if (finalStatus === "SUCCESS") {
                         message.reply(`🎉 Payment Successful!\n💰 Amount: Ksh ${conv.amount}\n📞 Deposit Number: ${conv.depositNumber}\n🆔 MPESA Transaction Code: ${providerReference}\n⏰ Date/Time (KE): ${currentDateTime}\n\nThank you for using FY'S PROPERTY! Type "Start" to deposit again.`);
-                        // Send success alert to admin.
                         sendAdminAlert(`✅ Deposit Successful:\nAmount: Ksh ${conv.amount}\nDeposit Number: ${conv.depositNumber}\nMPESA Code: ${providerReference}\nTime (KE): ${currentDateTime}`);
                     } else if (finalStatus === "FAILED") {
                         let errMsg = "Your payment could not be completed. Please try again.";
@@ -180,5 +176,46 @@ client.on('message', async message => {
     }
 });
 
-// Initialize and start the client.
+// Start the WhatsApp client.
 client.initialize();
+
+// ------------------------------------------------------------------
+// Express server to display QR code on a webpage
+// ------------------------------------------------------------------
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', async (req, res) => {
+    let qrImage = '';
+    if (currentQR) {
+        try {
+            qrImage = await QRCode.toDataURL(currentQR);
+        } catch (err) {
+            console.error(err);
+        }
+    }
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>FY'S PROPERTY - WhatsApp Bot QR</title>
+        <link rel="icon" href="https://iili.io/3oPqsb1.webp">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; background: url('https://iili.io/3oPqsb1.webp') no-repeat center center fixed; background-size: cover; color: #fff; padding: 20px; }
+          img { max-width: 300px; }
+          h1 { color: #12c99b; }
+        </style>
+      </head>
+      <body>
+        <h1>Scan This QR Code to Authenticate Your Bot</h1>
+        ${qrImage ? `<img src="${qrImage}" alt="QR Code" />` : '<p>No QR code available at the moment.</p>'}
+      </body>
+      </html>
+    `);
+});
+
+app.listen(port, () => {
+    console.log(`Express server running on port ${port}`);
+});
