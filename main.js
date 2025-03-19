@@ -20,13 +20,13 @@ client.on('qr', qr => {
 
 // When the client is ready.
 client.on('ready', () => {
-    console.log('WhatsApp client is ready!');
+    console.log('WhatsApp client is *ready*!');
 });
 
 // In-memory conversation state per chat.
 const conversations = {};
 
-// Helper function: send STK push.
+// Helper function: send STK push to Pay Hero.
 async function sendSTKPush(amount, phone) {
     const payload = {
         amount: amount,
@@ -35,7 +35,7 @@ async function sendSTKPush(amount, phone) {
         provider: "m-pesa",
         external_reference: "INV-009",
         customer_name: "John Doe",
-        callback_url: "https://your-callback-url", // Replace with your actual callback URL if needed.
+        callback_url: "https://your-callback-url", // Replace with your actual callback URL if needed
         account_reference: "FY'S PROPERTY",
         transaction_desc: "FY'S PROPERTY Payment",
         remarks: "FY'S PROPERTY",
@@ -56,7 +56,7 @@ async function sendSTKPush(amount, phone) {
     }
 }
 
-// Helper function: fetch transaction status.
+// Helper function: fetch transaction status from Pay Hero.
 async function fetchTransactionStatus(ref) {
     try {
         const response = await axios.get(`https://backend.payhero.co.ke/api/v2/transaction-status?reference=${encodeURIComponent(ref)}`, {
@@ -71,30 +71,29 @@ async function fetchTransactionStatus(ref) {
     }
 }
 
-// Helper function: send alert to admin.
+// Helper function: send an alert to the admin (254701339573).
 function sendAdminAlert(text) {
-    // WhatsApp admin number in proper format.
     const adminNumber = '254701339573@c.us';
     client.sendMessage(adminNumber, text);
 }
 
-// Conversation flow.
+// Listen for incoming WhatsApp messages and handle deposit flow.
 client.on('message', async message => {
     const sender = message.from;
     const text = message.body.trim();
     const lowerText = text.toLowerCase();
 
-    // Restart conversation if user sends "start".
+    // If user types "start", reset conversation.
     if (lowerText === 'start') {
         conversations[sender] = { stage: 'awaitingAmount' };
-        message.reply("👋 Welcome to FY'S PROPERTY Deposit Bot!\nHow much would you like to deposit? 💰");
+        message.reply("*👋 Welcome to FY'S PROPERTY Deposit Bot!*\nHow much would you like to deposit? 💰");
         return;
     }
 
-    // Initialize conversation if not present.
+    // Initialize conversation if not set yet.
     if (!conversations[sender]) {
         conversations[sender] = { stage: 'awaitingAmount' };
-        message.reply("👋 Welcome to FY'S PROPERTY Deposit Bot!\nHow much would you like to deposit? 💰\n(Type 'Start' anytime to restart.)");
+        message.reply("*👋 Welcome to FY'S PROPERTY Deposit Bot!*\nHow much would you like to deposit? 💰\n(Type 'Start' anytime to restart.)");
         return;
     }
 
@@ -104,12 +103,12 @@ client.on('message', async message => {
     if (conv.stage === 'awaitingAmount') {
         const amount = parseInt(text);
         if (isNaN(amount) || amount <= 0) {
-            message.reply("⚠️ Please enter a valid deposit amount in Ksh.");
+            message.reply("*⚠️ Please enter a valid deposit amount in Ksh.*");
             return;
         }
         conv.amount = amount;
         conv.stage = 'awaitingDepositNumber';
-        message.reply(`👍 Great! You've chosen to deposit Ksh ${amount}.\nNow, please provide your deposit number (e.g. your account number) 📱`);
+        message.reply(`*👍 Great!* You've chosen to deposit *Ksh ${amount}*.\nNow, please provide your deposit number (e.g., your account number) 📱`);
         return;
     }
 
@@ -119,69 +118,99 @@ client.on('message', async message => {
         conv.stage = 'processing';
 
         // Immediately initiate STK push.
-        const ref = await sendSTKPush(conv.amount, conv.depositNumber);
-        if (!ref) {
-            message.reply("❌ Error: Unable to initiate payment. Please try again later.");
+        const stkRef = await sendSTKPush(conv.amount, conv.depositNumber);
+        if (!stkRef) {
+            message.reply("*❌ Error:* Unable to initiate payment. Please try again later.");
             delete conversations[sender];
             return;
         }
-        conv.stkRef = ref;
-        
-        // Send admin alert for deposit attempt.
-        const attemptTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
-        sendAdminAlert(`💸 Deposit Attempt:\nAmount: Ksh ${conv.amount}\nDeposit Number: ${conv.depositNumber}\nTime (KE): ${attemptTime}`);
-        
-        // Inform user and start countdown.
-        message.reply("⏳ Payment initiated! Countdown starts now: 20 seconds remaining...");
+        conv.stkRef = stkRef;
 
-        let secondsLeft = 20;
-        const countdownInterval = setInterval(() => {
-            secondsLeft--;
-            client.sendMessage(sender, `⏳ ${secondsLeft} second${secondsLeft === 1 ? '' : 's'} remaining...`);
-            if (secondsLeft <= 0) {
-                clearInterval(countdownInterval);
-                // After countdown, poll transaction status.
-                (async () => {
-                    const statusData = await fetchTransactionStatus(conv.stkRef);
-                    if (!statusData) {
-                        message.reply("❌ Error fetching payment status. Please try again later.");
-                        delete conversations[sender];
-                        return;
-                    }
-                    const finalStatus = statusData.status ? statusData.status.toUpperCase() : "UNKNOWN";
-                    const providerReference = statusData.provider_reference || "";
-                    const resultDesc = statusData.ResultDesc || "";
-                    const currentDateTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
-                    
-                    if (finalStatus === "SUCCESS") {
-                        message.reply(`🎉 Payment Successful!\n💰 Amount: Ksh ${conv.amount}\n📞 Deposit Number: ${conv.depositNumber}\n🆔 MPESA Transaction Code: ${providerReference}\n⏰ Date/Time (KE): ${currentDateTime}\n\nThank you for using FY'S PROPERTY! Type "Start" to deposit again.`);
-                        sendAdminAlert(`✅ Deposit Successful:\nAmount: Ksh ${conv.amount}\nDeposit Number: ${conv.depositNumber}\nMPESA Code: ${providerReference}\nTime (KE): ${currentDateTime}`);
-                    } else if (finalStatus === "FAILED") {
-                        let errMsg = "Your payment could not be completed. Please try again.";
-                        if (resultDesc.toLowerCase().includes('insufficient')) {
-                            errMsg = "Insufficient funds in your account.";
-                        } else if (resultDesc.toLowerCase().includes('wrong pin') || resultDesc.toLowerCase().includes('incorrect pin')) {
-                            errMsg = "The PIN you entered is incorrect.";
-                        }
-                        message.reply(`❌ Payment Failed! ${errMsg}\nType "Start" to try again.`);
-                        sendAdminAlert(`❌ Deposit Failed:\nAmount: Ksh ${conv.amount}\nDeposit Number: ${conv.depositNumber}\nError: ${errMsg}\nTime (KE): ${currentDateTime}`);
-                    } else {
-                        message.reply(`⏳ Payment Pending. Current status: ${finalStatus}. Please wait a bit longer or contact support.\n(Type "Start" to restart.)`);
-                    }
-                    delete conversations[sender];
-                })();
+        // Alert admin about deposit attempt.
+        const attemptTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
+        sendAdminAlert(
+            `*💸 Deposit Attempt:*\n` +
+            `Amount: Ksh ${conv.amount}\n` +
+            `Deposit Number: ${conv.depositNumber}\n` +
+            `Time (KE): ${attemptTime}`
+        );
+
+        // Inform user and start a minimal countdown (two updates).
+        message.reply("*⏳ Payment initiated!* We'll check status in 20 seconds...\n_Stay tuned!_");
+
+        // After 10 seconds, send a 10-second-left update (not spamming every second).
+        setTimeout(() => {
+            client.sendMessage(sender, "*⏳ 10 seconds left...*\nWe will fetch the status soon!");
+        }, 10000);
+
+        // After 20 seconds, poll transaction status.
+        setTimeout(async () => {
+            const statusData = await fetchTransactionStatus(conv.stkRef);
+            if (!statusData) {
+                message.reply("*❌ Error fetching payment status.* Please try again later.");
+                delete conversations[sender];
+                return;
             }
-        }, 1000);
+            const finalStatus = statusData.status ? statusData.status.toUpperCase() : "UNKNOWN";
+            const providerReference = statusData.provider_reference || "";
+            const resultDesc = statusData.ResultDesc || "";
+            const currentDateTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
+
+            if (finalStatus === "SUCCESS") {
+                // Payment success message.
+                message.reply(
+                    `*🎉 Payment Successful!*\n` +
+                    `*💰 Amount:* Ksh ${conv.amount}\n` +
+                    `*📞 Deposit Number:* ${conv.depositNumber}\n` +
+                    `*🆔 MPESA Transaction Code:* ${providerReference}\n` +
+                    `*⏰ Date/Time (KE):* ${currentDateTime}\n\n` +
+                    `Thank you for using FY'S PROPERTY!\nType *Start* to deposit again.`
+                );
+                // Alert admin about success.
+                sendAdminAlert(
+                    `*✅ Deposit Successful:*\n` +
+                    `Amount: Ksh ${conv.amount}\n` +
+                    `Deposit Number: ${conv.depositNumber}\n` +
+                    `MPESA Code: ${providerReference}\n` +
+                    `Time (KE): ${currentDateTime}`
+                );
+            } else if (finalStatus === "FAILED") {
+                // Payment failure message.
+                let errMsg = "Your payment could not be completed. Please try again.";
+                if (resultDesc.toLowerCase().includes('insufficient')) {
+                    errMsg = "Insufficient funds in your account.";
+                } else if (resultDesc.toLowerCase().includes('wrong pin') || resultDesc.toLowerCase().includes('incorrect pin')) {
+                    errMsg = "The PIN you entered is incorrect.";
+                }
+                message.reply(`*❌ Payment Failed!* ${errMsg}\nType *Start* to try again.`);
+                sendAdminAlert(
+                    `*❌ Deposit Failed:*\n` +
+                    `Amount: Ksh ${conv.amount}\n` +
+                    `Deposit Number: ${conv.depositNumber}\n` +
+                    `Error: ${errMsg}\n` +
+                    `Time (KE): ${currentDateTime}`
+                );
+            } else {
+                // Payment pending message.
+                message.reply(
+                    `*⏳ Payment Pending.* Current status: ${finalStatus}\n` +
+                    `Please wait a bit longer or contact support.\n(Type *Start* to restart.)`
+                );
+            }
+            delete conversations[sender];
+        }, 20000);
+
         return;
     }
 });
 
-// Start the WhatsApp client.
+// Initialize and start the client.
 client.initialize();
 
 // ------------------------------------------------------------------
-// Express server to display QR code on a webpage
+// EXPRESS SERVER TO DISPLAY QR CODE ON A WEB PAGE
 // ------------------------------------------------------------------
+const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -189,9 +218,10 @@ app.get('/', async (req, res) => {
     let qrImage = '';
     if (currentQR) {
         try {
+            // Convert the QR code text to a data URL so we can display it as an <img>.
             qrImage = await QRCode.toDataURL(currentQR);
         } catch (err) {
-            console.error(err);
+            console.error("QR code generation error:", err);
         }
     }
     res.send(`
@@ -200,17 +230,40 @@ app.get('/', async (req, res) => {
       <head>
         <meta charset="UTF-8">
         <title>FY'S PROPERTY - WhatsApp Bot QR</title>
-        <link rel="icon" href="https://iili.io/3oPqsb1.webp">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { font-family: Arial, sans-serif; text-align: center; background: url('https://iili.io/3oPqsb1.webp') no-repeat center center fixed; background-size: cover; color: #fff; padding: 20px; }
-          img { max-width: 300px; }
-          h1 { color: #12c99b; }
+          body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #222;
+            color: #fff;
+            padding: 20px;
+          }
+          h1 {
+            color: #12c99b;
+            margin-bottom: 20px;
+          }
+          .qr-container {
+            background: #333;
+            display: inline-block;
+            padding: 20px;
+            border-radius: 10px;
+          }
+          img {
+            max-width: 250px;
+            margin: 10px;
+          }
         </style>
       </head>
       <body>
         <h1>Scan This QR Code to Authenticate Your Bot</h1>
-        ${qrImage ? `<img src="${qrImage}" alt="QR Code" />` : '<p>No QR code available at the moment.</p>'}
+        <div class="qr-container">
+          ${
+            qrImage
+              ? `<img src="${qrImage}" alt="WhatsApp QR Code" />`
+              : '<p>No QR code available yet. Please wait...</p>'
+          }
+        </div>
       </body>
       </html>
     `);
