@@ -1,0 +1,69 @@
+=====*Admin Commands*=====
+
+View commands by typing "Admin"
+
+****How to use:****
+===============================
+
+*ADMIN COMMANDS:*
+1) *admin* - Show this help.
+2) *edit <key> <newText>* - Edit any of these keys:
+   - welcomeMessage
+   - depositChosen
+   - paymentInitiated
+   - countdownUpdate
+   - paymentSuccess
+   - paymentFooter
+   - fromAdmin
+   - channelID
+   Example:
+     edit depositChosen Great, you decided to deposit {amount} Ksh!
+3) *msg [254700363422,254701339573] message...* - Broadcast to multiple users.(use it at you Own risk)
+   Example:
+     msg [254712345678,254701234567] Hello from Admin GK-FY!
+
+ 
+==================================
+ ********Example on how to use it******
+
+
+1. edit welcomeMessage 👋 *Hello! Thank you for reaching out to FY'S PROPERTY.* 
+
+ _🤖 This is an automated bot designed to process your deposits quickly and efficiently._ 
+
+ *💰 Please enter the amount you'd like to deposit to proceed.*
+
+2. edit paymentFooter  *🌟 Thank You for Choosing FYS PROPERTY!* 
+
+💼 Your trust means everything to us! Ready for another deposit? Just send " *Start* " to begin.
+
+ *🤗 We’re always happy to serve you!*
+
+3. edit depositChosen *🎉 Great Choice!* You've selected to deposit *Ksh {amount}.* 📲 Please enter your phone number to proceed: (Eg. 07xxxxx or 01xxxxx)
+4. edit paymentSuccess *🎉 PAYMENT SUCCESSFUL!* 
+
+ *✅ Amount Paid:* Ksh{amount}.00
+ *📲 Deposit Number:* {depositNumber}
+ *🔖 MPESA Code:* {mpesaCode}
+*🕒 Date & Time:* {date}
+
+{footer}
+
+5 edit paymentInitiated  *✅ Success!* Your payment has been initiated successfully.
+
+ _⏳ Please wait for *{seconds} seconds...* We're processing your transaction status..._ 
+
+ *🔄 Hold tight, we’ll update you shortly!*
+
+6. edit countdownUpdate _*⏳ We're Still Processing...*_ 
+
+⌛ *{seconds} seconds* remaining... Please hold on as we complete your request...
+
+7. edit fromAdmin 🔔From Admin GK-FY🕊️
+
+8. edit channelID 724
+
+======================================================
+
+
+Enjoy the service 🤗 ====Created By FY'S PROPERTY 🕊️=========
